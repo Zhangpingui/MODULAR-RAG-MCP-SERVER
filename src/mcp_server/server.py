@@ -44,6 +44,41 @@ def _redirect_all_loggers_to_stderr() -> None:
     root.addHandler(stderr_handler)
 
 
+def _preload_heavy_imports() -> None:
+    """Eagerly import heavy third-party modules in the **main thread**.
+
+    MCP SDK uses anyio + background threads for stdin/stdout I/O.
+    When a tool handler runs ``asyncio.to_thread(fn)``, *fn* executes in
+    a new worker thread.  If it tries to ``import chromadb`` (which
+    transitively pulls in onnxruntime, numpy, sqlite3 C extensions …),
+    that import can deadlock with the stdin-reader thread because both
+    compete for Python's global *import lock*.
+
+    Pre-importing here – before anyio spins up its I/O threads – avoids
+    the deadlock entirely: subsequent ``import`` statements in worker
+    threads simply hit ``sys.modules`` and return immediately.
+    """
+    # chromadb is the heaviest culprit (onnxruntime, numpy, …)
+    try:
+        import chromadb  # noqa: F401
+        import chromadb.config  # noqa: F401
+    except ImportError:
+        pass  # optional at install time
+
+    # Internal modules that tools lazy-import inside asyncio.to_thread
+    try:
+        import src.core.query_engine.query_processor  # noqa: F401
+        import src.core.query_engine.hybrid_search  # noqa: F401
+        import src.core.query_engine.dense_retriever  # noqa: F401
+        import src.core.query_engine.sparse_retriever  # noqa: F401
+        import src.core.query_engine.reranker  # noqa: F401
+        import src.ingestion.storage.bm25_indexer  # noqa: F401
+        import src.libs.embedding.embedding_factory  # noqa: F401
+        import src.libs.vector_store.vector_store_factory  # noqa: F401
+    except ImportError:
+        pass
+
+
 async def run_stdio_server_async() -> int:
     """Run MCP server over stdio asynchronously.
 
@@ -55,6 +90,10 @@ async def run_stdio_server_async() -> int:
 
     # Ensure ALL logging goes to stderr (stdout is reserved for JSON-RPC)
     _redirect_all_loggers_to_stderr()
+
+    # Pre-load heavy deps in main thread to prevent import-lock deadlocks
+    # when tool handlers later call asyncio.to_thread().
+    _preload_heavy_imports()
 
     logger = get_logger(log_level="INFO")
     logger.info("Starting MCP server (stdio transport) with official SDK.")
