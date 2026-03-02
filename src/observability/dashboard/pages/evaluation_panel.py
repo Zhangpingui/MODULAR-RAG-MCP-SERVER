@@ -233,6 +233,16 @@ def _execute_evaluation(
     target_collection = collection or "default"
     hybrid_search = _try_create_hybrid_search(settings, target_collection)
 
+    # Create reranker if enabled
+    reranker = None
+    try:
+        from src.core.query_engine.reranker import create_core_reranker
+        reranker = create_core_reranker(settings=settings)
+        if not reranker.is_enabled:
+            reranker = None
+    except Exception as exc:
+        logger.warning("Could not create reranker: %s", exc)
+
     # Build answer_override map: index → user-provided answer text
     # EvalRunner will use these instead of auto-generating from chunks.
     runner = EvalRunner(
@@ -240,6 +250,7 @@ def _execute_evaluation(
         hybrid_search=hybrid_search,
         evaluator=evaluator,
         answer_overrides=user_answers,
+        reranker=reranker,
     )
 
     report = runner.run(

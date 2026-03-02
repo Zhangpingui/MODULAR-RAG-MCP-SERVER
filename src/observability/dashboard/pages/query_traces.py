@@ -377,12 +377,13 @@ def _retrieve_chunks(
     top_k: int,
     collection: str,
 ) -> list:
-    """Re-run HybridSearch to retrieve chunks for evaluation."""
+    """Re-run HybridSearch + Rerank to retrieve chunks for evaluation."""
     try:
         from src.core.query_engine.hybrid_search import create_hybrid_search
         from src.core.query_engine.query_processor import QueryProcessor
         from src.core.query_engine.dense_retriever import create_dense_retriever
         from src.core.query_engine.sparse_retriever import create_sparse_retriever
+        from src.core.query_engine.reranker import create_core_reranker
         from src.ingestion.storage.bm25_indexer import BM25Indexer
         from src.libs.embedding.embedding_factory import EmbeddingFactory
         from src.libs.vector_store.vector_store_factory import VectorStoreFactory
@@ -412,8 +413,19 @@ def _retrieve_chunks(
             sparse_retriever=sparse_retriever,
         )
 
-        results = hybrid_search.search(query=query, top_k=top_k)
-        return results if isinstance(results, list) else results.results
+        # Retrieve more candidates if rerank is enabled
+        reranker = create_core_reranker(settings=settings)
+        initial_top_k = top_k * 2 if reranker.is_enabled else top_k
+
+        results = hybrid_search.search(query=query, top_k=initial_top_k)
+        results = results if isinstance(results, list) else results.results
+
+        # Apply reranking if enabled
+        if reranker.is_enabled and results:
+            rerank_result = reranker.rerank(query=query, results=results, top_k=top_k)
+            results = rerank_result.results
+
+        return results
     except Exception as exc:
         logger.warning("Retrieval for evaluation failed: %s", exc)
         return []
