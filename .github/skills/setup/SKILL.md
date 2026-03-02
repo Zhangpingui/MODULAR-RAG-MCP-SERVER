@@ -23,20 +23,41 @@ Preflight → Ask User → Generate Config → Install Deps → Validate → Lau
 
 Verify prerequisites before asking the user anything:
 
+### 1.1 Check Python Version
+
 ```powershell
 python --version          # Require >=3.10
-pip --version             # Verify pip available
 ```
 
-If Python < 3.10, stop and inform user. Check if `.venv` exists; if not, create it:
+If Python < 3.10, stop and inform user to install a supported version.
+
+### 1.2 Check & Create Virtual Environment
+
+Check if `.venv` directory already exists. If it does, skip creation and just activate it. If it does NOT exist, create it and activate it.
+
+**Important:** Use `--without-pip` to avoid the slow `ensurepip` step that can hang on Windows, then bootstrap pip manually with `ensurepip` after activation.
 
 ```powershell
-python -m venv .venv
+# Step 1: Check if .venv exists
+Test-Path ".venv"
+
+# Step 2: If .venv does NOT exist, create it (fast, no pip bundling)
+python -m venv .venv --without-pip
+
+# Step 3: Activate the virtual environment
 # Windows:
 .\.venv\Scripts\Activate.ps1
 # macOS/Linux:
 # source .venv/bin/activate
+
+# Step 4: Bootstrap pip inside the venv (only needed after --without-pip)
+python -m ensurepip --upgrade
+
+# Step 5: Verify
+pip --version             # Should show pip path inside .venv
 ```
+
+If `.venv` already exists, only run Step 3 (activate) and Step 5 (verify).
 
 ---
 
