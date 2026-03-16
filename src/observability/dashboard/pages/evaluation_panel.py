@@ -25,27 +25,52 @@ DEFAULT_GOLDEN_SET = Path("tests/fixtures/golden_test_set.json")
 EVAL_HISTORY_PATH = Path("logs/eval_history.jsonl")
 
 
+def _resolve_metrics_for_backend(backend: str, configured_metrics: List[str]) -> List[str]:
+    """Return backend-compatible metric list for evaluator creation.
+
+    The dashboard lets users switch evaluator backend at runtime. Metrics in
+    settings may belong to a different backend (e.g. ragas metrics while using
+    custom), so we normalize here to avoid provider instantiation errors.
+    """
+    backend = (backend or "").strip().lower()
+    normalized = [str(m).strip().lower() for m in (configured_metrics or []) if str(m).strip()]
+
+    if backend == "custom":
+        supported = [m for m in normalized if m in {"hit_rate", "mrr"}]
+        return supported or ["hit_rate", "mrr"]
+
+    if backend == "ragas":
+        supported = [
+            m for m in normalized
+            if m in {"faithfulness", "answer_relevancy", "context_precision"}
+        ]
+        return supported or ["faithfulness", "answer_relevancy", "context_precision"]
+
+    # composite / others: preserve configured list; downstream backends can
+    # handle partial compatibility on their own.
+    return normalized
+
+
 def render() -> None:
     """Render the Evaluation Panel page."""
-    st.header("📏 Evaluation Panel")
+    st.header("📏 评估面板")
     st.markdown(
-        "Run evaluation against a **golden test set** to measure retrieval "
-        "and generation quality. Results include per-query details and "
-        "aggregate metrics."
+        "基于**黄金测试集**运行评估，用于衡量检索与生成质量。"
+        "结果包含逐查询明细与聚合指标。"
     )
 
     # ── Configuration Section ──────────────────────────────────────
-    st.subheader("⚙️ Configuration")
+    st.subheader("⚙️ 配置")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
         backend = st.selectbox(
-            "Evaluator Backend",
+            "评估后端",
             options=["custom", "ragas", "composite"],
             index=0,
             key="eval_backend",
-            help="Select which evaluator backend to use.",
+            help="选择要使用的评估后端。",
         )
 
     # Show info/warning based on selected backend
@@ -65,32 +90,32 @@ def render() -> None:
             max_value=50,
             value=10,
             key="eval_top_k",
-            help="Number of chunks to retrieve per query.",
+            help="每次查询检索的分块数量。",
         )
 
     with col3:
         collection = st.text_input(
-            "Collection (optional)",
+            "集合（可选）",
             value="",
             key="eval_collection",
-            help="Limit retrieval to a specific collection.",
+            help="将检索范围限制在指定集合。",
         )
 
     # Golden test set file selection
     golden_path_str = st.text_input(
-        "Golden Test Set Path",
+        "黄金测试集路径",
         value=str(DEFAULT_GOLDEN_SET),
         key="eval_golden_path",
-        help="Path to the golden_test_set.json file.",
+        help="golden_test_set.json 文件路径。",
     )
     golden_path = Path(golden_path_str)
 
     # Validate golden set exists
     if not golden_path.exists():
         st.warning(
-            f"⚠️ **Golden test set not found:** `{golden_path}`. "
-            "Create a JSON file with test queries and expected results. "
-            "See `tests/fixtures/golden_test_set.json` for the format."
+            f"⚠️ **未找到黄金测试集：** `{golden_path}`。"
+            "请创建包含测试查询与期望结果的 JSON 文件。"
+            "格式可参考 `tests/fixtures/golden_test_set.json`。"
         )
 
     # ── Answer Input Section (for Ragas) ───────────────────────────
@@ -139,7 +164,7 @@ def render() -> None:
     st.divider()
 
     run_clicked = st.button(
-        "▶️  Run Evaluation",
+        "▶️  开始评估",
         type="primary",
         key="eval_run_btn",
         disabled=not golden_path.exists(),
@@ -172,7 +197,7 @@ def _run_evaluation(
     display aggregate + per-query metrics.  Falls back to a graceful
     error message on failure.
     """
-    with st.spinner("Loading evaluator and running evaluation…"):
+    with st.spinner("正在加载评估器并执行评估…"):
         try:
             report_dict = _execute_evaluation(
                 backend=backend,
@@ -182,12 +207,12 @@ def _run_evaluation(
                 user_answers=user_answers,
             )
         except Exception as exc:
-            st.error(f"❌ Evaluation failed: {exc}")
+            st.error(f"❌ 评估失败: {exc}")
             logger.exception("Evaluation failed")
             return
 
     # ── Display results ────────────────────────────────────────────
-    st.success("✅ Evaluation complete!")
+    st.success("✅ 评估完成！")
 
     _render_aggregate_metrics(report_dict)
     _render_query_details(report_dict)
@@ -219,10 +244,14 @@ def _execute_evaluation(
     # Override evaluator provider from UI selection — build a new full
     # Settings object so that RagasEvaluator can still access .llm / .embedding.
     eval_settings = settings.evaluation
+    selected_metrics = _resolve_metrics_for_backend(
+        backend,
+        eval_settings.metrics if hasattr(eval_settings, "metrics") else [],
+    )
     overridden_eval = type(eval_settings)(
         enabled=True,
         provider=backend,
-        metrics=eval_settings.metrics if hasattr(eval_settings, "metrics") else [],
+        metrics=selected_metrics,
     )
     # Replace only the evaluation sub-config in the full settings
     settings_with_override = dc_replace(settings, evaluation=overridden_eval)
@@ -308,12 +337,12 @@ def _try_create_hybrid_search(settings: Any, collection: str = "default") -> Any
 
 def _render_aggregate_metrics(report: Dict[str, Any]) -> None:
     """Display aggregate metrics as metric cards."""
-    st.subheader("📊 Aggregate Metrics")
+    st.subheader("📊 聚合指标")
 
     agg = report.get("aggregate_metrics", {})
 
     if not agg:
-        st.info("No aggregate metrics available.")
+        st.info("暂无聚合指标。")
         return
 
     cols = st.columns(min(len(agg), 4))
@@ -325,19 +354,19 @@ def _render_aggregate_metrics(report: Dict[str, Any]) -> None:
             )
 
     st.caption(
-        f"Evaluator: **{report.get('evaluator_name', '—')}** · "
-        f"Queries: **{report.get('query_count', 0)}** · "
-        f"Total time: **{report.get('total_elapsed_ms', 0):.0f} ms**"
+        f"评估器: **{report.get('evaluator_name', '—')}** · "
+        f"查询数: **{report.get('query_count', 0)}** · "
+        f"总耗时: **{report.get('total_elapsed_ms', 0):.0f} ms**"
     )
 
 
 def _render_query_details(report: Dict[str, Any]) -> None:
     """Display per-query evaluation results in an expandable table."""
-    st.subheader("🔍 Per-Query Details")
+    st.subheader("🔍 单查询详情")
 
     query_results = report.get("query_results", [])
     if not query_results:
-        st.info("No per-query results available.")
+        st.info("暂无单查询结果。")
         return
 
     for idx, qr in enumerate(query_results):
@@ -350,7 +379,7 @@ def _render_query_details(report: Dict[str, Any]) -> None:
             f"{k}: {v:.3f}" for k, v in sorted(metrics.items())
         )
         if not metric_summary:
-            metric_summary = "no metrics"
+            metric_summary = "无指标"
 
         with st.expander(
             f"**Q{idx + 1}**: {query[:80]} — {elapsed:.0f} ms — {metric_summary}",
@@ -366,26 +395,26 @@ def _render_query_details(report: Dict[str, Any]) -> None:
             # Retrieved chunks
             chunks = qr.get("retrieved_chunk_ids", [])
             if chunks:
-                st.markdown(f"**Retrieved Chunks** ({len(chunks)}):")
+                st.markdown(f"**召回分块**（{len(chunks)}）:")
                 st.code(", ".join(chunks[:20]), language=None)
 
             # Generated answer
             answer = qr.get("generated_answer")
             if answer:
-                st.markdown("**Generated Answer:**")
+                st.markdown("**生成回答：**")
                 st.text(answer[:500])
 
 
 def _render_history() -> None:
     """Display historical evaluation results for comparison."""
-    st.subheader("📈 Evaluation History")
+    st.subheader("📈 评估历史")
 
     history = _load_history()
     if not history:
         st.info(
-            "**No evaluation history yet.** "
-            "Configure the evaluator above and click \"Run Evaluation\" to start. "
-            "Results will be saved here for comparison across runs."
+            "**暂无评估历史。** "
+            "请先在上方完成配置并点击“开始评估”。"
+            "结果会保存到此处，便于多次运行对比。"
         )
         return
 
@@ -394,10 +423,10 @@ def _render_history() -> None:
     for entry in history[-10:]:  # last 10 runs
         rows.append(
             {
-                "Timestamp": entry.get("timestamp", "—"),
-                "Evaluator": entry.get("evaluator_name", "—"),
-                "Queries": entry.get("query_count", 0),
-                "Time (ms)": round(entry.get("total_elapsed_ms", 0)),
+                "时间": entry.get("timestamp", "—"),
+                "评估器": entry.get("evaluator_name", "—"),
+                "查询数": entry.get("query_count", 0),
+                "耗时(ms)": round(entry.get("total_elapsed_ms", 0)),
                 **{
                     k: round(v, 4)
                     for k, v in entry.get("aggregate_metrics", {}).items()

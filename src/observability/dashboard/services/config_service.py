@@ -66,7 +66,7 @@ class ConfigService:
 
         # Embedding
         cards.append(ComponentInfo(
-            name="Embedding",
+            name="向量编码",
             provider=s.embedding.provider,
             model=s.embedding.model,
             extra={"dimensions": s.embedding.dimensions},
@@ -74,7 +74,7 @@ class ConfigService:
 
         # VectorStore
         cards.append(ComponentInfo(
-            name="Vector Store",
+            name="向量存储",
             provider=s.vector_store.provider,
             model=s.vector_store.collection_name,
             extra={"persist_directory": s.vector_store.persist_directory},
@@ -82,9 +82,9 @@ class ConfigService:
 
         # Retrieval
         cards.append(ComponentInfo(
-            name="Retrieval",
+            name="检索",
             provider="hybrid",
-            model="dense + sparse + RRF",
+            model="稠密 + 稀疏 + RRF",
             extra={
                 "dense_top_k": s.retrieval.dense_top_k,
                 "sparse_top_k": s.retrieval.sparse_top_k,
@@ -94,8 +94,8 @@ class ConfigService:
 
         # Rerank
         cards.append(ComponentInfo(
-            name="Reranker",
-            provider=s.rerank.provider if s.rerank.enabled else "disabled",
+            name="重排器",
+            provider=s.rerank.provider if s.rerank.enabled else "已禁用",
             model=s.rerank.model if s.rerank.enabled else "-",
             extra={"enabled": s.rerank.enabled, "top_k": s.rerank.top_k},
         ))
@@ -103,7 +103,7 @@ class ConfigService:
         # Vision LLM
         if s.vision_llm and s.vision_llm.enabled:
             cards.append(ComponentInfo(
-                name="Vision LLM",
+                name="视觉 LLM",
                 provider=s.vision_llm.provider,
                 model=s.vision_llm.model,
                 extra={"max_image_size": s.vision_llm.max_image_size},
@@ -112,7 +112,7 @@ class ConfigService:
         # Ingestion
         if s.ingestion:
             cards.append(ComponentInfo(
-                name="Ingestion",
+                name="数据摄取",
                 provider=s.ingestion.splitter,
                 model="-",
                 extra={
